@@ -145,6 +145,15 @@ class QspFfi {
       return instance;
     }
     try {
+      if (Platform.isIOS) {
+        // iOS forbids loading unsigned dynamic libraries. The QSP engine is
+        // linked statically into the Runner binary, so its C symbols are
+        // resolved from the running process.
+        debugPrint(
+            '[QSP FFI] Resolving QSP symbols from the app process on iOS...');
+        instance = QspFfi._(DynamicLibrary.process());
+        return instance;
+      }
       if (Platform.isAndroid) {
         debugPrint('[QSP FFI] Opening libqsp.so on Android...');
         instance = QspFfi._(DynamicLibrary.open('libqsp.so'));

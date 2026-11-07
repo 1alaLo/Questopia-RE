@@ -121,7 +121,11 @@ set(QSP_SOURCES
 	qsp/variables.c qsp/variables.h
 	qsp/variant.c qsp/variant.h
 )
-add_library(qsp SHARED ${QSP_SOURCES})
+if (IOS)
+	add_library(qsp STATIC ${QSP_SOURCES})
+else()
+	add_library(qsp SHARED ${QSP_SOURCES})
+endif()
 target_compile_definitions(qsp PUBLIC _UNICODE)
 if (WIN32)
 	target_compile_definitions(qsp PRIVATE _CRT_SECURE_NO_WARNINGS)
@@ -176,3 +180,14 @@ install(FILES
 	DESTINATION
 		"${CMAKE_INSTALL_INCLUDEDIR}/qsp/default"
 )
+
+if (IOS)
+	# iOS cannot load unsigned dynamic libraries, so the engine is linked into
+	# the Runner binary as a single static archive. Apple's libtool merges the
+	# engine with the bundled Oniguruma build.
+	add_custom_command(TARGET qsp POST_BUILD
+		COMMAND /usr/bin/libtool -static -o "${CMAKE_BINARY_DIR}/libqsp_all.a"
+			"$<TARGET_FILE:qsp>" "$<TARGET_FILE:onig>"
+		COMMENT "Merging QSP and Oniguruma into libqsp_all.a"
+		VERBATIM)
+endif()

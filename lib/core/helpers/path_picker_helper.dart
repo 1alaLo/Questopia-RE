@@ -169,13 +169,14 @@ class PathPickerHelper {
                       minVerticalPadding: 12,
                       onTap: () => Navigator.pop(ctx, 1),
                     ),
-                    SegmentedListTile(
-                      leading: const Icon(Icons.folder_open_outlined),
-                      title: Text(l10n.gameFolder),
-                      trailing: const Icon(Icons.chevron_right),
-                      minVerticalPadding: 12,
-                      onTap: () => Navigator.pop(ctx, 2),
-                    ),
+                    if (!Platform.isIOS)
+                      SegmentedListTile(
+                        leading: const Icon(Icons.folder_open_outlined),
+                        title: Text(l10n.gameFolder),
+                        trailing: const Icon(Icons.chevron_right),
+                        minVerticalPadding: 12,
+                        onTap: () => Navigator.pop(ctx, 2),
+                      ),
                   ],
                 ),
                 const SizedBox(height: 16),
