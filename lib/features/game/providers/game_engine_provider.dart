@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import '../../../core/audio/game_audio.dart';
+import '../../../core/media/qsp_path_resolver.dart';
 import '../../../core/native/qsp_callbacks.dart';
 import '../../../core/native/qsp_ffi.dart';
 import '../../../core/native/qsp_models.dart';
@@ -118,8 +119,18 @@ class GameEngineNotifier extends StateNotifier<GameEngineState> {
 
   GameAudio get audio => _audio;
 
+  /// Resolver shared with the UI so media lookups reuse the same cache and
+  /// (lazily built) file index.
+  QspPathResolver? get pathResolver => _pathResolver;
+
   QspCallbackBridge? _bridge;
   Timer? _timer;
+
+  /// Cached resolver for media and save paths.
+  ///
+  /// Rebuilding a recursive file index for every SHOWIMAGE/PLAY callback made
+  /// heavy games (tens of thousands of files) freeze for seconds at a time.
+  QspPathResolver? _pathResolver;
 
   bool _autosaveEnabled = false;
   int _autosaveInterval = 15;
@@ -233,6 +244,7 @@ class GameEngineNotifier extends StateNotifier<GameEngineState> {
     final gameDir = p.dirname(game.gameFilePath);
     debugPrint('[GameEngineNotifier] Setting audio directory: "$gameDir"');
     _audio.setGameDirectory(gameDir);
+    _pathResolver = QspPathResolver([gameDir, game.folderPath]);
 
     final ffi = _ffi;
     if (ffi == null) {
@@ -490,88 +502,17 @@ class GameEngineNotifier extends StateNotifier<GameEngineState> {
     }
     cleanPath = cleanPath.replaceAll('\\', '/');
 
-    // 1. Direct / case-insensitive match in gameDir
-    final fileInGameDir = _resolveCaseInsensitiveFile(gameDir, cleanPath);
-    if (fileInGameDir != null && fileInGameDir.existsSync()) {
-      return fileInGameDir.path;
+    // 1. Cached resolver: direct hit, case-insensitive sibling lookup, and
+    //    (only when needed) a background index of the game folder.
+    final resolver = _pathResolver;
+    if (resolver != null) {
+      final resolved = resolver.resolve(cleanPath);
+      if (resolved != null) return resolved;
     }
 
-    // 2. Direct / case-insensitive match in rootFolder
-    final fileInRoot = _resolveCaseInsensitiveFile(rootFolder, cleanPath);
-    if (fileInRoot != null && fileInRoot.existsSync()) {
-      return fileInRoot.path;
-    }
-
-    // 3. Fallback: recursive suffix search in both directories
-    final targetSuffix = cleanPath.toLowerCase();
-    final targetBase = p.basename(cleanPath).toLowerCase();
-
-    File? findRecursive(Directory dir) {
-      try {
-        if (!dir.existsSync()) return null;
-        for (final entity in dir.listSync(recursive: true, followLinks: false)) {
-          if (entity is File) {
-            final norm = entity.path.replaceAll('\\', '/').toLowerCase();
-            if (norm.endsWith('/$targetSuffix') || norm.endsWith(targetSuffix)) {
-              return entity;
-            }
-            if (p.basename(norm) == targetBase) {
-              return entity;
-            }
-          }
-        }
-      } catch (_) {}
-      return null;
-    }
-
-    final foundInGameDir = findRecursive(gameDir);
-    if (foundInGameDir != null) return foundInGameDir.path;
-
-    final foundInRoot = findRecursive(rootFolder);
-    if (foundInRoot != null) return foundInRoot.path;
-
+    // 2. Fallback to the expected location so save paths still work before the
+    //    target file exists.
     return p.join(gameDir.path, cleanPath);
-  }
-
-  File? _resolveCaseInsensitiveFile(Directory gameDir, String relativePath) {
-    if (!gameDir.existsSync()) return null;
-    final directFile = File(p.join(gameDir.path, relativePath));
-    if (directFile.existsSync()) return directFile;
-
-    final parts = p.split(relativePath.replaceAll('\\', '/'));
-    FileSystemEntity current = gameDir;
-
-    for (final part in parts) {
-      if (part == '.' || part.isEmpty) continue;
-      if (part == '..') {
-        current = current.parent;
-        continue;
-      }
-      if (current is! Directory) return null;
-
-      List<FileSystemEntity> children;
-      try {
-        children = current.listSync();
-      } catch (_) {
-        return null;
-      }
-
-      FileSystemEntity? match;
-      final partLower = part.toLowerCase();
-      for (final child in children) {
-        final name = p.basename(child.path);
-        if (name.toLowerCase() == partLower) {
-          match = child;
-          break;
-        }
-      }
-
-      if (match == null) return null;
-      current = match;
-    }
-
-    if (current is File) return current;
-    return null;
   }
 
   Future<void> _openStatusFile(String path) async {
@@ -617,7 +558,11 @@ class GameEngineNotifier extends StateNotifier<GameEngineState> {
   void _armTimer(int msecs) {
     _timer?.cancel();
     _timer = null;
-    state = state.copyWith(timerIntervalMs: msecs);
+    // Rebuilding the whole screen on every SETTIMER was a measurable cost in
+    // games that re-arm the timer each turn.
+    if (state.timerIntervalMs != msecs) {
+      state = state.copyWith(timerIntervalMs: msecs);
+    }
     if (msecs <= 0) return;
     _timer = Timer.periodic(Duration(milliseconds: msecs), (_) {
       final ffi = _ffi;

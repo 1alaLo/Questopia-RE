@@ -1,6 +1,8 @@
 import 'dart:io';
 
 import 'package:audioplayers/audioplayers.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 
 abstract interface class AudioBackend {
@@ -21,35 +23,133 @@ final class AudioPlayersBackend implements AudioBackend {
 
   @override
   Future<void> play(String absolutePath, double volume) async {
-    final player = _playerFor(absolutePath);
-    await player.setVolume(volume);
-    await player.play(DeviceFileSource(absolutePath));
+    try {
+      final player = _playerFor(absolutePath);
+      await player.setVolume(volume);
+      await player.play(DeviceFileSource(absolutePath));
+    } catch (e) {
+      debugPrint(
+          '[GameAudio] audioplayers failed to play "$absolutePath": $e');
+    }
   }
 
   @override
   Future<void> pause(String absolutePath) async {
-    await _players[absolutePath]?.pause();
+    try {
+      await _players[absolutePath]?.pause();
+    } catch (e) {
+      debugPrint('[GameAudio] audioplayers pause failed: $e');
+    }
   }
 
   @override
   Future<void> resume(String absolutePath) async {
-    await _players[absolutePath]?.resume();
+    try {
+      await _players[absolutePath]?.resume();
+    } catch (e) {
+      debugPrint('[GameAudio] audioplayers resume failed: $e');
+    }
   }
 
   @override
   Future<void> stop(String absolutePath) async {
-    await _players[absolutePath]?.stop();
+    try {
+      await _players[absolutePath]?.stop();
+    } catch (e) {
+      debugPrint('[GameAudio] audioplayers stop failed: $e');
+    }
   }
 
   @override
   Future<void> setVolume(String absolutePath, double volume) async {
-    await _players[absolutePath]?.setVolume(volume);
+    try {
+      await _players[absolutePath]?.setVolume(volume);
+    } catch (e) {
+      debugPrint('[GameAudio] audioplayers volume failed: $e');
+    }
   }
 
   @override
   Future<void> dispose(String absolutePath) async {
     final player = _players.remove(absolutePath);
-    if (player != null) await player.dispose();
+    if (player != null) {
+      try {
+        await player.dispose();
+      } catch (e) {
+        debugPrint('[GameAudio] audioplayers dispose failed: $e');
+      }
+    }
+  }
+}
+
+/// Plays QSP sounds through the small AVAudioPlayer bridge in `AppDelegate`.
+///
+/// The stock audioplayers implementation leaves the shared audio session
+/// inactive until a sound finishes, which can leave a freshly started game
+/// completely silent on iOS. The native bridge activates a `.playback` session
+/// on the first sound and keeps MP3 playback independent of the ring/silent
+/// switch. It falls back to audioplayers if the channel is unavailable.
+final class NativeIosAudioBackend implements AudioBackend {
+  static const MethodChannel _channel = MethodChannel('questopia/audio');
+
+  AudioPlayersBackend? _fallback;
+  bool _unavailable = false;
+
+  Future<bool> _tryNative(String method, Map<String, Object?> arguments) async {
+    if (_unavailable) return false;
+    try {
+      await _channel.invokeMethod<void>(method, arguments);
+      return true;
+    } on MissingPluginException {
+      _unavailable = true;
+      debugPrint(
+          '[GameAudio] Native iOS audio channel unavailable, using audioplayers');
+      return false;
+    } catch (e) {
+      debugPrint('[GameAudio] Native iOS audio "$method" failed: $e');
+      return true;
+    }
+  }
+
+  AudioPlayersBackend get _fallbackBackend =>
+      _fallback ??= AudioPlayersBackend();
+
+  @override
+  Future<void> play(String absolutePath, double volume) async {
+    final handled = await _tryNative(
+        'play', {'path': absolutePath, 'volume': volume});
+    if (!handled) await _fallbackBackend.play(absolutePath, volume);
+  }
+
+  @override
+  Future<void> pause(String absolutePath) async {
+    final handled = await _tryNative('pause', {'path': absolutePath});
+    if (!handled) await _fallbackBackend.pause(absolutePath);
+  }
+
+  @override
+  Future<void> resume(String absolutePath) async {
+    final handled = await _tryNative('resume', {'path': absolutePath});
+    if (!handled) await _fallbackBackend.resume(absolutePath);
+  }
+
+  @override
+  Future<void> stop(String absolutePath) async {
+    final handled = await _tryNative('stop', {'path': absolutePath});
+    if (!handled) await _fallbackBackend.stop(absolutePath);
+  }
+
+  @override
+  Future<void> setVolume(String absolutePath, double volume) async {
+    final handled = await _tryNative(
+        'setVolume', {'path': absolutePath, 'volume': volume});
+    if (!handled) await _fallbackBackend.setVolume(absolutePath, volume);
+  }
+
+  @override
+  Future<void> dispose(String absolutePath) async {
+    final handled = await _tryNative('dispose', {'path': absolutePath});
+    if (!handled) await _fallbackBackend.dispose(absolutePath);
   }
 }
 
@@ -65,11 +165,16 @@ final class _SoundEntry {
 /// Keeps one cached entry per sound path, resolves relative game paths
 /// against the active game directory (case-insensitively), maps the QSP
 /// 0-100 volume range onto the player 0.0-1.0 range, and honors the
-/// `isSoundEnabled` preference. The engine callback bridge (phase 4)
-/// calls [playFile] and [closeFile].
+/// `isSoundEnabled` preference. The engine callback bridge (phase 4) calls
+/// [playFile] and [closeFile].
 final class GameAudio {
   GameAudio({AudioBackend? backend})
-      : _backend = backend ?? AudioPlayersBackend();
+      : _backend = backend ?? _defaultBackend();
+
+  static AudioBackend _defaultBackend() {
+    if (Platform.isIOS) return NativeIosAudioBackend();
+    return AudioPlayersBackend();
+  }
 
   final AudioBackend _backend;
   final Map<String, _SoundEntry> _sounds = {};
@@ -122,7 +227,10 @@ final class GameAudio {
 
   Future<void> playFile(String path, int volume) async {
     final resolved = resolvePath(path);
-    if (resolved == null) return;
+    if (resolved == null) {
+      debugPrint('[GameAudio] sound not found: "$path"');
+      return;
+    }
     final key = resolved.toLowerCase();
     final entry = _sounds.putIfAbsent(
       key,

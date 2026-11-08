@@ -14,6 +14,7 @@ class QspVideo extends StatefulWidget {
     this.fit = BoxFit.contain,
     this.width,
     this.height,
+    this.mixWithOthers = true,
   });
 
   final String path;
@@ -23,6 +24,12 @@ class QspVideo extends StatefulWidget {
   final BoxFit fit;
   final double? width;
   final double? height;
+
+  /// Keeps the shared audio session usable by the QSP sound engine.
+  ///
+  /// Video playback otherwise takes over the session and silences the MP3
+  /// sounds the game starts around the same time.
+  final bool mixWithOthers;
 
   @override
   State<QspVideo> createState() => _QspVideoState();
@@ -37,9 +44,11 @@ class _QspVideoState extends State<QspVideo> {
     final lower = path.toLowerCase();
     final isRemote =
         lower.startsWith('http://') || lower.startsWith('https://');
+    final options = VideoPlayerOptions(mixWithOthers: widget.mixWithOthers);
     return isRemote
-        ? VideoPlayerController.networkUrl(Uri.parse(path))
-        : VideoPlayerController.file(File(path));
+        ? VideoPlayerController.networkUrl(Uri.parse(path),
+            videoPlayerOptions: options)
+        : VideoPlayerController.file(File(path), videoPlayerOptions: options);
   }
 
   @override

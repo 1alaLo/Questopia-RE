@@ -202,39 +202,40 @@ class QspFfi {
   }
 
   List<QspAction> getActions() {
-    final bufSize = 256;
-    final itemsPtr = calloc<QSPListItemStruct>(bufSize);
-    try {
-      final count = _getActions(itemsPtr, bufSize);
-      final actions = <QspAction>[];
-      for (var i = 0; i < count; i++) {
-        final item = itemsPtr[i];
-        final name = QspUtf16.fromStruct(item.name);
-        final image = QspUtf16.fromStruct(item.image);
-        actions.add(QspAction(index: i, name: name, image: image));
-      }
-      return actions;
-    } finally {
-      calloc.free(itemsPtr);
+    final itemsPtr = _itemsBuffer();
+    final count = _getActions(itemsPtr, _listBufferSize);
+    final actions = <QspAction>[];
+    for (var i = 0; i < count; i++) {
+      final item = itemsPtr[i];
+      final name = QspUtf16.fromStruct(item.name);
+      final image = QspUtf16.fromStruct(item.image);
+      actions.add(QspAction(index: i, name: name, image: image));
     }
+    return actions;
   }
 
   List<QspObject> getObjects() {
-    final bufSize = 256;
-    final itemsPtr = calloc<QSPListItemStruct>(bufSize);
-    try {
-      final count = _getObjects(itemsPtr, bufSize);
-      final objects = <QspObject>[];
-      for (var i = 0; i < count; i++) {
-        final item = itemsPtr[i];
-        final name = QspUtf16.fromStruct(item.name);
-        final image = QspUtf16.fromStruct(item.image);
-        objects.add(QspObject(index: i, name: name, image: image));
-      }
-      return objects;
-    } finally {
-      calloc.free(itemsPtr);
+    final itemsPtr = _itemsBuffer();
+    final count = _getObjects(itemsPtr, _listBufferSize);
+    final objects = <QspObject>[];
+    for (var i = 0; i < count; i++) {
+      final item = itemsPtr[i];
+      final name = QspUtf16.fromStruct(item.name);
+      final image = QspUtf16.fromStruct(item.image);
+      objects.add(QspObject(index: i, name: name, image: image));
     }
+    return objects;
+  }
+
+  /// Reused list buffer for the action/object queries.
+  ///
+  /// A heavy game refreshes several times per second, and allocating and
+  /// freeing this structure on every refresh was pure GC churn.
+  static const int _listBufferSize = 256;
+  Pointer<QSPListItemStruct>? _listBufferPtr;
+
+  Pointer<QSPListItemStruct> _itemsBuffer() {
+    return _listBufferPtr ??= calloc<QSPListItemStruct>(_listBufferSize);
   }
 
   bool executeAction(int index, {bool refresh = true}) {

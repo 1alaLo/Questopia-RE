@@ -76,6 +76,7 @@ class QspMedia extends StatelessWidget {
             fit: fit,
             width: width,
             height: height,
+            mixWithOthers: true,
           );
         }
       } else {
@@ -95,7 +96,7 @@ class QspMedia extends StatelessWidget {
     }
 
     final path = resolver != null ? resolver!.resolve(src) : src;
-    if (path == null || !File(path).existsSync()) {
+    if (path == null || (resolver == null && !File(path).existsSync())) {
       return _broken(context);
     }
 
@@ -131,6 +132,7 @@ class QspMedia extends StatelessWidget {
             fit: fit,
             width: width,
             height: height,
+            mixWithOthers: true,
           );
         }
         break;

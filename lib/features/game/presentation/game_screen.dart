@@ -40,11 +40,33 @@ class _GameScreenState extends ConsumerState<GameScreen>
   QspPathResolver? _resolver;
   String? _resolverKey;
 
+  /// Parsed action/object labels and resolved icons are reused between
+  /// rebuilds; heavy games rebuild the action list on every turn.
+  final Map<String, ({String? imagePath, String text})> _visualCache = {};
+  final Map<String, File?> _assetCache = {};
+
   QspPathResolver _getResolver() {
+    // The engine already owns a resolver for the active game (it resolves
+    // SHOWIMAGE/PLAYFILE paths). Reusing it means the file index and the
+    // per-path cache are shared instead of built twice.
+    final engine = ref.read(gameEngineProvider.notifier);
+    final shared = engine.pathResolver;
+    if (shared != null) {
+      if (!identical(shared, _resolver)) {
+        _resolver = shared;
+        _resolverKey = null;
+        _visualCache.clear();
+        _assetCache.clear();
+      }
+      return shared;
+    }
+
     final game = ref.read(gameEngineProvider).activeGame;
     final key = '${game?.gameFilePath}|${game?.folderPath}';
     if (_resolver == null || _resolverKey != key) {
       _resolverKey = key;
+      _visualCache.clear();
+      _assetCache.clear();
       final gameDir = game != null ? p.dirname(game.gameFilePath) : '';
       final rootFolder = game?.folderPath ?? '';
       _resolver = QspPathResolver([gameDir, rootFolder]);
@@ -236,12 +258,12 @@ class _GameScreenState extends ConsumerState<GameScreen>
   /// Locates an asset file within the game directory using QspPathResolver.
   File? _findGameAssetFile(String relativePath) {
     if (relativePath.trim().isEmpty) return null;
+    final key = relativePath.toLowerCase();
+    if (_assetCache.containsKey(key)) return _assetCache[key];
     final resolved = _getResolver().resolve(relativePath);
-    if (resolved != null) {
-      final f = File(resolved);
-      if (f.existsSync()) return f;
-    }
-    return null;
+    final file = resolved != null ? File(resolved) : null;
+    _assetCache[key] = file;
+    return file;
   }
 
   /// Extracts image paths (from image property or embedded <img> tag) and sanitized text.
@@ -249,6 +271,12 @@ class _GameScreenState extends ConsumerState<GameScreen>
     String rawName,
     String rawImage,
   ) {
+    final key = '$rawName\u0000$rawImage';
+    final cached = _visualCache[key];
+    if (cached != null) return cached;
+    // Labels can embed live values (money, time), so keep the cache bounded.
+    if (_visualCache.length > 4096) _visualCache.clear();
+
     var imgPath = rawImage.trim();
     if (imgPath.isEmpty) {
       final match = RegExp(
@@ -261,10 +289,12 @@ class _GameScreenState extends ConsumerState<GameScreen>
     }
 
     final cleanText = _stripTags(rawName).trim();
-    return (
+    final result = (
       imagePath: imgPath.isNotEmpty ? imgPath : null,
       text: cleanText,
     );
+    _visualCache[key] = result;
+    return result;
   }
 
   void _maybeShowEngineDialog(GameDialogType dialog) {
@@ -726,7 +756,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
         visual.imagePath != null ? _findGameAssetFile(visual.imagePath!) : null;
 
     Widget? imageWidget;
-    if (file != null && file.existsSync()) {
+    if (file != null) {
       imageWidget = ClipRRect(
         borderRadius: BorderRadius.circular(6),
         child: Image.file(
