@@ -147,7 +147,11 @@ target_include_directories(qsp
 		"$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/qsp/default>"
 )
 
-install(TARGETS qsp EXPORT QspTargets)
+if (IOS)
+	install(TARGETS qsp)
+else()
+	install(TARGETS qsp EXPORT QspTargets)
+endif()
 
 generate_export_header(qsp
   BASE_NAME Qsp
@@ -159,8 +163,12 @@ configure_package_config_file(QspConfig.cmake.in ${CMAKE_CURRENT_BINARY_DIR}/cma
 	INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/Qsp"
 )
 
-export(TARGETS qsp NAMESPACE Qsp:: FILE ${CMAKE_CURRENT_BINARY_DIR}/QspConfig.cmake)
-install(EXPORT QspTargets NAMESPACE Qsp:: DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/Qsp")
+# The iOS build only needs the merged static archive; skip the CMake package
+# export so the bundled Oniguruma target does not have to join the export set.
+if (NOT IOS)
+	export(TARGETS qsp NAMESPACE Qsp:: FILE ${CMAKE_CURRENT_BINARY_DIR}/QspConfig.cmake)
+	install(EXPORT QspTargets NAMESPACE Qsp:: DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/Qsp")
+endif()
 
 install(
 	DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/cmake
