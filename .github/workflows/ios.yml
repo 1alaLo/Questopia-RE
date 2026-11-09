@@ -40,7 +40,16 @@ jobs:
         run: flutter pub get
 
       - name: Build unsigned app
-        run: flutter build ios --release --no-codesign
+        run: |
+          set +e
+          flutter build ios --release --no-codesign -v > build-ios.log 2>&1
+          status=$?
+          if [ $status -ne 0 ] || [ ! -d build/ios/iphoneos/Runner.app ]; then
+            echo "=== flutter build failed (exit $status); last 400 log lines ==="
+            tail -n 400 build-ios.log
+            exit 1
+          fi
+          echo "=== build succeeded ==="
 
       - name: Verify QSP symbols in the app binary
         run: nm -gU build/ios/iphoneos/Runner.app/Runner | grep QSPInit
