@@ -11,7 +11,11 @@ permissions:
 jobs:
   build-ios:
     name: Build unsigned IPA
-    runs-on: macos-15
+    # Intel image on purpose: the arm64 macOS pool regularly runs out of
+    # capacity and the job then fails to ever get a runner. The device build is
+    # cross-compiled for iphoneos/arm64 either way, so the host arch is
+    # irrelevant to the output.
+    runs-on: macos-15-intel
     steps:
       - name: Checkout
         uses: actions/checkout@v4
