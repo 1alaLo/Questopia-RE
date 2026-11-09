@@ -37,6 +37,24 @@ abstract final class QuestopiaTheme {
     'serif-monospace', // 11 - Serif monospace
   ];
 
+  // iOS has no "sans-serif"/"monospace" aliases: naming one of the Android
+  // families there silently falls back to the system font, so the typeface
+  // picker looked broken. These are real families shipped with iOS/iPadOS.
+  static const List<String> _iosFontFamilies = <String>[
+    '', // 0 - Default system
+    'Helvetica Neue', // 1 - Sans-serif
+    'Georgia', // 2 - Serif
+    'Menlo', // 3 - Monospace
+    'Avenir Next', // 4 - Medium
+    'Snell Roundhand', // 5 - Cursive
+    'Optima', // 6 - Light
+    'Futura', // 7 - Condensed
+    'Copperplate', // 8 - Black
+    'Gill Sans', // 9 - Thin
+    'Marker Felt', // 10 - Casual
+    'Courier New', // 11 - Serif monospace
+  ];
+
   // Every entry must be a real, DISTINCT family name. Flutter resolves
   // `fontFamily` by family, not by face, so naming a face ("Segoe UI Semibold")
   // silently renders as the parent family and the choice looks broken. Families
@@ -62,8 +80,11 @@ abstract final class QuestopiaTheme {
   /// Returns null for index 0 and any out-of-range index so the game text
   /// falls back to the platform default font.
   static String? fontFamilyFor(int index) {
-    final families =
-        isDesktopPlatform ? _desktopFontFamilies : _androidFontFamilies;
+    final families = isDesktopPlatform
+        ? _desktopFontFamilies
+        : defaultTargetPlatform == TargetPlatform.iOS
+            ? _iosFontFamilies
+            : _androidFontFamilies;
     if (index <= 0 || index >= families.length) return null;
     return families[index];
   }

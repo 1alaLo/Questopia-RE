@@ -146,54 +146,79 @@ final class QspInputStrTextEvent extends QspEngineEvent {
   String toString() => 'QspInputStrTextEvent("$text")';
 }
 
+/// Handlers below read the native `QSPString` synchronously, before the engine
+/// releases it. They must therefore be registered as isolate-local callables,
+/// never as listener callables: a listener delivers the call asynchronously,
+/// by which point QSP has already recycled the string buffer and the Dart side
+/// decodes freed memory (garbled text, bogus media paths).
 void _onShowMessage(QSPStringStruct text) {
-  final msg = QspUtf16.fromStruct(text);
-  QspCallbackBridge._dispatch(QspShowMessageEvent(msg));
+  try {
+    final msg = QspUtf16.fromStruct(text);
+    QspCallbackBridge._dispatch(QspShowMessageEvent(msg));
+  } catch (_) {}
 }
 
 void _onShowImage(QSPStringStruct file) {
-  final path = QspUtf16.fromStruct(file);
-  QspCallbackBridge._dispatch(QspShowImageEvent(path));
+  try {
+    final path = QspUtf16.fromStruct(file);
+    QspCallbackBridge._dispatch(QspShowImageEvent(path));
+  } catch (_) {}
 }
 
 void _onPlayFile(QSPStringStruct file, int volume) {
-  final path = QspUtf16.fromStruct(file);
-  QspCallbackBridge._dispatch(QspPlayFileEvent(path, volume));
+  try {
+    final path = QspUtf16.fromStruct(file);
+    QspCallbackBridge._dispatch(QspPlayFileEvent(path, volume));
+  } catch (_) {}
 }
 
 void _onCloseFile(QSPStringStruct file) {
-  final path = QspUtf16.fromStruct(file);
-  QspCallbackBridge._dispatch(QspCloseFileEvent(path));
+  try {
+    final path = QspUtf16.fromStruct(file);
+    QspCallbackBridge._dispatch(QspCloseFileEvent(path));
+  } catch (_) {}
 }
 
 void _onDebug(QSPStringStruct text) {
-  final msg = QspUtf16.fromStruct(text);
-  QspCallbackBridge._dispatch(QspDebugEvent(msg));
+  try {
+    final msg = QspUtf16.fromStruct(text);
+    QspCallbackBridge._dispatch(QspDebugEvent(msg));
+  } catch (_) {}
 }
 
 void _onSystem(QSPStringStruct cmd) {
-  final command = QspUtf16.fromStruct(cmd);
-  QspCallbackBridge._dispatch(QspSystemEvent(command));
+  try {
+    final command = QspUtf16.fromStruct(cmd);
+    QspCallbackBridge._dispatch(QspSystemEvent(command));
+  } catch (_) {}
 }
 
 void _onSetInputStrText(QSPStringStruct text) {
-  final str = QspUtf16.fromStruct(text);
-  QspCallbackBridge._dispatch(QspInputStrTextEvent(str));
+  try {
+    final str = QspUtf16.fromStruct(text);
+    QspCallbackBridge._dispatch(QspInputStrTextEvent(str));
+  } catch (_) {}
 }
 
 void _onOpenGame(QSPStringStruct file, int isNewGame) {
-  final path = QspUtf16.fromStruct(file);
-  QspCallbackBridge._dispatch(QspOpenGameStatusEvent(path));
+  try {
+    final path = QspUtf16.fromStruct(file);
+    QspCallbackBridge._dispatch(QspOpenGameStatusEvent(path));
+  } catch (_) {}
 }
 
 void _onOpenGameStatus(QSPStringStruct file) {
-  final path = QspUtf16.fromStruct(file);
-  QspCallbackBridge._dispatch(QspOpenGameStatusEvent(path));
+  try {
+    final path = QspUtf16.fromStruct(file);
+    QspCallbackBridge._dispatch(QspOpenGameStatusEvent(path));
+  } catch (_) {}
 }
 
 void _onSaveGameStatus(QSPStringStruct file) {
-  final path = QspUtf16.fromStruct(file);
-  QspCallbackBridge._dispatch(QspSaveGameStatusEvent(path));
+  try {
+    final path = QspUtf16.fromStruct(file);
+    QspCallbackBridge._dispatch(QspSaveGameStatusEvent(path));
+  } catch (_) {}
 }
 
 void _onSetTimer(int msecs) {
@@ -243,25 +268,25 @@ final class QspCallbackBridge {
         .lookupFunction<NativeSetCallback, DartSetCallback>('QSPSetCallback');
 
     void installStr(QspCallbackId id, DartStrCallback fn) {
-      final callable = NativeCallable<NativeStrCallback>.listener(fn);
+      final callable = NativeCallable<NativeStrCallback>.isolateLocal(fn);
       _callables.add(callable);
       setCallback(id.nativeIndex, callable.nativeFunction.cast());
     }
 
     void installStrInt(QspCallbackId id, DartStrIntCallback fn) {
-      final callable = NativeCallable<NativeStrIntCallback>.listener(fn);
+      final callable = NativeCallable<NativeStrIntCallback>.isolateLocal(fn);
       _callables.add(callable);
       setCallback(id.nativeIndex, callable.nativeFunction.cast());
     }
 
     void installInt(QspCallbackId id, DartIntCallback fn) {
-      final callable = NativeCallable<NativeIntCallback>.listener(fn);
+      final callable = NativeCallable<NativeIntCallback>.isolateLocal(fn);
       _callables.add(callable);
       setCallback(id.nativeIndex, callable.nativeFunction.cast());
     }
 
     void installIntBool(QspCallbackId id, DartIntBoolCallback fn) {
-      final callable = NativeCallable<NativeIntBoolCallback>.listener(fn);
+      final callable = NativeCallable<NativeIntBoolCallback>.isolateLocal(fn);
       _callables.add(callable);
       setCallback(id.nativeIndex, callable.nativeFunction.cast());
     }

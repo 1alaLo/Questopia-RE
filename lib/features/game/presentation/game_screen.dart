@@ -625,6 +625,19 @@ class _GameScreenState extends ConsumerState<GameScreen>
         height: 1.5,
       );
 
+  /// Widest comfortable measure for the reading panes.
+  ///
+  /// On a tablet the story pane is more than a thousand points wide; letting
+  /// the text run the full width produces very long lines that are hard to
+  /// read, so the column is capped and centred instead.
+  static const double _maxReadingWidth = 820;
+
+  /// Breakpoint above which the actions get their own column.
+  static const double _wideLayoutBreakpoint = 900;
+
+  /// Width of the action column in the tablet layout.
+  static const double _actionColumnWidth = 360;
+
   Widget _buildStoryTab(
     BuildContext context,
     String mainHtml,
@@ -632,7 +645,9 @@ class _GameScreenState extends ConsumerState<GameScreen>
     GameEngineNotifier engineNotifier,
     SettingsState settings,
   ) {
-    final screenHeight = MediaQuery.sizeOf(context).height;
+    final size = MediaQuery.sizeOf(context);
+    final screenHeight = size.height;
+    final isWide = size.width >= _wideLayoutBreakpoint;
     double maxActionHeight;
     switch (settings.actionsHeightRatio) {
       case '1/5':
@@ -660,79 +675,113 @@ class _GameScreenState extends ConsumerState<GameScreen>
     final theme = Theme.of(context);
     final surface = _readingSurface(settings, theme);
 
+    final story = SingleChildScrollView(
+      controller: _storyScrollController,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: _maxReadingWidth),
+          child: QspHtmlView(
+            html: mainHtml,
+            resolver: resolver,
+            backgroundColor: surface.background,
+            textStyle: _gameTextStyle(settings, surface.foreground),
+            linkColor: surface.link,
+            disableImages: settings.isImageDisabled,
+            muteVideos: settings.isVideoMute,
+            imageWidthOverride:
+                settings.isAutoWidth ? null : settings.customWidthImage,
+            imageHeightOverride:
+                settings.isAutoHeight ? null : settings.customHeightImage,
+            onTapLink: (url) {
+              final lower = url.toLowerCase();
+              if (lower.startsWith('exec:') ||
+                  lower.contains('/exec:') ||
+                  lower.contains('exec%3a')) {
+                final code = HtmlProcessor.decodeExecUrl(url);
+                engineNotifier.execCode(code);
+                return true;
+              }
+              return false;
+            },
+          ),
+        ),
+      ),
+    );
+
+    final hasActions = engineState.gameState.actions.isNotEmpty;
+    final actions = hasActions
+        ? Container(
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+            decoration: BoxDecoration(
+              color: surface.background,
+              // The separator line is opt-in, so the panel reads as part of
+              // the story surface until the user asks for a divider.
+              border: settings.isUseSeparator
+                  ? Border(
+                      top: BorderSide(
+                        color: theme.colorScheme.outlineVariant
+                            .withValues(alpha: 0.3),
+                        width: 0.5,
+                      ),
+                    )
+                  : null,
+            ),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: isWide ? double.infinity : maxActionHeight,
+              ),
+              child: SingleChildScrollView(
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: engineState.gameState.actions.map((act) {
+                    return _buildActionButton(
+                      context,
+                      act,
+                      engineNotifier,
+                      settings,
+                    );
+                  }).toList(),
+                ),
+              ),
+            ),
+          )
+        : null;
+
+    if (isWide) {
+      // Tablet: story on the left, actions in a dedicated column. This mirrors
+      // the classic QSP layout and keeps the buttons reachable instead of
+      // pushing them off the bottom of a tall screen.
+      return Container(
+        color: surface.background,
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Expanded(child: story),
+            if (actions != null) ...[
+              VerticalDivider(
+                width: 1,
+                thickness: 0.5,
+                color: theme.colorScheme.outlineVariant.withValues(alpha: 0.3),
+              ),
+              SizedBox(
+                width: _actionColumnWidth,
+                child: actions,
+              ),
+            ],
+          ],
+        ),
+      );
+    }
+
     return Container(
       color: surface.background,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Expanded(
-            child: SingleChildScrollView(
-              controller: _storyScrollController,
-              padding: const EdgeInsets.all(16),
-              child: QspHtmlView(
-                html: mainHtml,
-                resolver: resolver,
-                backgroundColor: surface.background,
-                textStyle: _gameTextStyle(settings, surface.foreground),
-                linkColor: surface.link,
-                disableImages: settings.isImageDisabled,
-                muteVideos: settings.isVideoMute,
-                imageWidthOverride:
-                    settings.isAutoWidth ? null : settings.customWidthImage,
-                imageHeightOverride:
-                    settings.isAutoHeight ? null : settings.customHeightImage,
-                onTapLink: (url) {
-                  final lower = url.toLowerCase();
-                  if (lower.startsWith('exec:') ||
-                      lower.contains('/exec:') ||
-                      lower.contains('exec%3a')) {
-                    final code = HtmlProcessor.decodeExecUrl(url);
-                    engineNotifier.execCode(code);
-                    return true;
-                  }
-                  return false;
-                },
-              ),
-            ),
-          ),
-          if (engineState.gameState.actions.isNotEmpty) ...[
-            Container(
-              padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-              decoration: BoxDecoration(
-                color: surface.background,
-                // The separator line is opt-in, so the panel reads as part of
-                // the story surface until the user asks for a divider.
-                border: settings.isUseSeparator
-                    ? Border(
-                        top: BorderSide(
-                          color: Theme.of(context)
-                              .colorScheme
-                              .outlineVariant
-                              .withValues(alpha: 0.3),
-                          width: 0.5,
-                        ),
-                      )
-                    : null,
-              ),
-              child: ConstrainedBox(
-                constraints: BoxConstraints(maxHeight: maxActionHeight),
-                child: SingleChildScrollView(
-                  child: Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: engineState.gameState.actions.map((act) {
-                      return _buildActionButton(
-                        context,
-                        act,
-                        engineNotifier,
-                        settings,
-                      );
-                    }).toList(),
-                  ),
-                ),
-              ),
-            ),
-          ],
+          Expanded(child: story),
+          if (actions != null) actions,
         ],
       ),
     );
@@ -864,29 +913,34 @@ class _GameScreenState extends ConsumerState<GameScreen>
       color: surface.background,
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
-        child: QspHtmlView(
-          html: varsHtml,
-          resolver: resolver,
-          backgroundColor: surface.background,
-          textStyle: _gameTextStyle(settings, surface.foreground),
-          linkColor: surface.link,
-          disableImages: settings.isImageDisabled,
-          muteVideos: settings.isVideoMute,
-          imageWidthOverride:
-              settings.isAutoWidth ? null : settings.customWidthImage,
-          imageHeightOverride:
-              settings.isAutoHeight ? null : settings.customHeightImage,
-          onTapLink: (url) {
-            final lower = url.toLowerCase();
-            if (lower.startsWith('exec:') ||
-                lower.contains('/exec:') ||
-                lower.contains('exec%3a')) {
-              final code = HtmlProcessor.decodeExecUrl(url);
-              ref.read(gameEngineProvider.notifier).execCode(code);
-              return true;
-            }
-            return false;
-          },
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: _maxReadingWidth),
+            child: QspHtmlView(
+              html: varsHtml,
+              resolver: resolver,
+              backgroundColor: surface.background,
+              textStyle: _gameTextStyle(settings, surface.foreground),
+              linkColor: surface.link,
+              disableImages: settings.isImageDisabled,
+              muteVideos: settings.isVideoMute,
+              imageWidthOverride:
+                  settings.isAutoWidth ? null : settings.customWidthImage,
+              imageHeightOverride:
+                  settings.isAutoHeight ? null : settings.customHeightImage,
+              onTapLink: (url) {
+                final lower = url.toLowerCase();
+                if (lower.startsWith('exec:') ||
+                    lower.contains('/exec:') ||
+                    lower.contains('exec%3a')) {
+                  final code = HtmlProcessor.decodeExecUrl(url);
+                  ref.read(gameEngineProvider.notifier).execCode(code);
+                  return true;
+                }
+                return false;
+              },
+            ),
+          ),
         ),
       ),
     );
@@ -993,76 +1047,82 @@ class _GameScreenState extends ConsumerState<GameScreen>
       );
     }
 
-    return ListView.builder(
-      padding: const EdgeInsets.all(16),
-      itemCount: parsedObjects.length,
-      itemBuilder: (context, index) {
-        final item = parsedObjects[index];
-        final hasImage = item.file != null && item.file!.existsSync();
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: _maxReadingWidth),
+        child: ListView.builder(
+          padding: const EdgeInsets.all(16),
+          itemCount: parsedObjects.length,
+          itemBuilder: (context, index) {
+            final item = parsedObjects[index];
+            final hasImage = item.file != null && item.file!.existsSync();
 
-        return Card(
-          margin: const EdgeInsets.only(bottom: 10),
-          elevation: 0.5,
-          color: colors.surfaceContainerLow,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(14),
-            side: BorderSide(
-              color: colors.outlineVariant.withValues(alpha: 0.4),
-              width: 0.5,
-            ),
-          ),
-          clipBehavior: Clip.antiAlias,
-          child: ListTile(
-            contentPadding:
-                const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-            leading: hasImage
-                ? Container(
-                    width: 52,
-                    height: 52,
-                    decoration: BoxDecoration(
-                      color: colors.surfaceContainerHighest,
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(
-                        color: colors.outlineVariant.withValues(alpha: 0.5),
-                        width: 0.5,
-                      ),
-                    ),
-                    padding: const EdgeInsets.all(4),
-                    child: Image.file(
-                      item.file!,
-                      fit: BoxFit.contain,
-                      gaplessPlayback: true,
-                      errorBuilder: (_, __, ___) => Icon(
-                        Icons.inventory_2_outlined,
-                        color: colors.outline,
-                      ),
-                    ),
-                  )
-                : CircleAvatar(
-                    backgroundColor: colors.secondaryContainer,
-                    child: Icon(
-                      Icons.inventory_2_outlined,
-                      color: colors.onSecondaryContainer,
-                    ),
-                  ),
-            title: Text(
-              item.visual.text.isNotEmpty
-                  ? item.visual.text
-                  : 'Item #${item.obj.index + 1}',
-              style: TextStyle(
-                fontWeight: FontWeight.w600,
-                fontSize: objectFontSize,
-                color: colors.onSurface,
+            return Card(
+              margin: const EdgeInsets.only(bottom: 10),
+              elevation: 0.5,
+              color: colors.surfaceContainerLow,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+                side: BorderSide(
+                  color: colors.outlineVariant.withValues(alpha: 0.4),
+                  width: 0.5,
+                ),
               ),
-            ),
-            onTap: () {
-              debugPrint(
-                  '[GameScreen] Selected object #${item.obj.index}: "${item.obj.name}"');
-              engineNotifier.selectObject(item.obj.index);
-            },
-          ),
-        );
-      },
+              clipBehavior: Clip.antiAlias,
+              child: ListTile(
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                leading: hasImage
+                    ? Container(
+                        width: 52,
+                        height: 52,
+                        decoration: BoxDecoration(
+                          color: colors.surfaceContainerHighest,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color:
+                                colors.outlineVariant.withValues(alpha: 0.5),
+                            width: 0.5,
+                          ),
+                        ),
+                        padding: const EdgeInsets.all(4),
+                        child: Image.file(
+                          item.file!,
+                          fit: BoxFit.contain,
+                          gaplessPlayback: true,
+                          errorBuilder: (_, __, ___) => Icon(
+                            Icons.inventory_2_outlined,
+                            color: colors.outline,
+                          ),
+                        ),
+                      )
+                    : CircleAvatar(
+                        backgroundColor: colors.secondaryContainer,
+                        child: Icon(
+                          Icons.inventory_2_outlined,
+                          color: colors.onSecondaryContainer,
+                        ),
+                      ),
+                title: Text(
+                  item.visual.text.isNotEmpty
+                      ? item.visual.text
+                      : 'Item #${item.obj.index + 1}',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    fontSize: objectFontSize,
+                    color: colors.onSurface,
+                  ),
+                ),
+                onTap: () {
+                  debugPrint(
+                      '[GameScreen] Selected object #${item.obj.index}: "${item.obj.name}"');
+                  engineNotifier.selectObject(item.obj.index);
+                },
+              ),
+            );
+          },
+        ),
+      ),
     );
   }
 }

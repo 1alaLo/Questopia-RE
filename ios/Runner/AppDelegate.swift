@@ -26,6 +26,11 @@ import UIKit
 /// activates a `.playback` session on the first sound, so MP3 playback works
 /// regardless of the ring/silent switch, and keeps one player per path like the
 /// Android implementation.
+///
+/// Every mutating call answers `nil` on success and a short description string
+/// on failure. The Dart side logs that string into the on-device log file, which
+/// is the only diagnostic channel available for a sideloaded build, and falls
+/// back to audioplayers when a call reports a problem.
 final class QuestopiaAudioPlugin: NSObject, FlutterPlugin, AVAudioPlayerDelegate {
   private var players: [String: AVAudioPlayer] = [:]
 
@@ -50,27 +55,54 @@ final class QuestopiaAudioPlugin: NSObject, FlutterPlugin, AVAudioPlayerDelegate
       let volume = (args["volume"] as? NSNumber)?.doubleValue ?? 1.0
       result(play(path: path, volume: volume))
     case "pause":
-      if let path = args["path"] as? String {
-        players[path]?.pause()
+      guard let path = args["path"] as? String else {
+        result("path missing")
+        return
       }
+      guard let player = players[path] else {
+        result("no player for \(path)")
+        return
+      }
+      player.pause()
       result(nil)
     case "resume":
-      if let path = args["path"] as? String {
-        activateSession()
-        players[path]?.play()
+      guard let path = args["path"] as? String else {
+        result("path missing")
+        return
+      }
+      guard let player = players[path] else {
+        result("no player for \(path)")
+        return
+      }
+      if let failure = activateSession() {
+        return result(failure)
+      }
+      if !player.play() {
+        return result("resume refused for \(path)")
       }
       result(nil)
     case "stop", "dispose":
-      if let path = args["path"] as? String {
-        players[path]?.stop()
-        players.removeValue(forKey: path)
+      guard let path = args["path"] as? String else {
+        result("path missing")
+        return
       }
-      result(nil)
+      if let player = players.removeValue(forKey: path) {
+        player.stop()
+        result(nil)
+      } else {
+        result("no player for \(path)")
+      }
     case "setVolume":
-      if let path = args["path"] as? String {
-        let volume = (args["volume"] as? NSNumber)?.doubleValue ?? 1.0
-        players[path]?.volume = Float(volume)
+      guard let path = args["path"] as? String else {
+        result("path missing")
+        return
       }
+      guard let player = players[path] else {
+        result("no player for \(path)")
+        return
+      }
+      let volume = (args["volume"] as? NSNumber)?.doubleValue ?? 1.0
+      player.volume = Float(volume)
       result(nil)
     case "stopAll":
       for player in players.values {
@@ -78,25 +110,41 @@ final class QuestopiaAudioPlugin: NSObject, FlutterPlugin, AVAudioPlayerDelegate
       }
       players.removeAll()
       result(nil)
+    case "status":
+      // Diagnostic snapshot for the log file: whether the session is actually
+      // active is the single most useful fact when playback is silent.
+      let session = AVAudioSession.sharedInstance()
+      let info: [String: Any] = [
+        "players": players.count,
+        "category": session.category.rawValue,
+        "mode": session.mode.rawValue,
+        "active": session.isOtherAudioPlaying ? "other" : "idle",
+        "outputVolume": session.outputVolume,
+        "route": session.currentRoute.outputs.map { $0.portType.rawValue }.joined(separator: ","),
+      ]
+      result(info)
     default:
       result(FlutterMethodNotImplemented)
     }
   }
 
-  private func play(path: String, volume: Double) -> Bool {
+  /// Returns nil when the sound started, otherwise a short failure reason.
+  private func play(path: String, volume: Double) -> String? {
     guard FileManager.default.fileExists(atPath: path) else {
       NSLog("[QuestopiaAudio] missing file: %@", path)
-      return false
+      return "missing file: \(path)"
     }
 
-    activateSession()
+    if let failure = activateSession() {
+      return failure
+    }
 
     if let player = players[path] {
       player.volume = Float(volume)
-      if !player.isPlaying {
-        player.play()
+      if !player.isPlaying && !player.play() {
+        return "restart refused for \(path)"
       }
-      return true
+      return nil
     }
 
     do {
@@ -106,25 +154,28 @@ final class QuestopiaAudioPlugin: NSObject, FlutterPlugin, AVAudioPlayerDelegate
       player.numberOfLoops = 0
       player.prepareToPlay()
       players[path] = player
-      let started = player.play()
-      if !started {
+      if !player.play() {
         NSLog("[QuestopiaAudio] failed to start: %@", path)
         players.removeValue(forKey: path)
+        return "start refused for \(path)"
       }
-      return started
+      return nil
     } catch {
       NSLog("[QuestopiaAudio] cannot open %@: %@", path, String(describing: error))
-      return false
+      return "cannot open \(path): \(error.localizedDescription)"
     }
   }
 
-  private func activateSession() {
+  /// Returns nil when the session is active, otherwise the error description.
+  private func activateSession() -> String? {
     let session = AVAudioSession.sharedInstance()
     do {
       try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
       try session.setActive(true, options: [])
+      return nil
     } catch {
       NSLog("[QuestopiaAudio] audio session error: %@", String(describing: error))
+      return "audio session error: \(error.localizedDescription)"
     }
   }
 

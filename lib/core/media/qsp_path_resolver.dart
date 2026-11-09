@@ -23,12 +23,18 @@ class QspPathResolver {
 
   bool _indexing = false;
   bool _indexed = false;
-  bool _indexRequested = false;
+  Future<void>? _indexFuture;
+
+  /// Completes once the background index has been built (or failed to build).
+  ///
+  /// Callers that missed a lookup use this to retry instead of showing a
+  /// permanent placeholder.
+  Future<void> ensureIndexed() {
+    return _indexFuture ??= _buildIndex();
+  }
 
   void _ensureIndex() {
-    if (_indexed || _indexRequested) return;
-    _indexRequested = true;
-    unawaited(_buildIndex());
+    unawaited(ensureIndexed());
   }
 
   Future<void> _buildIndex() async {
@@ -78,6 +84,8 @@ class QspPathResolver {
       _relMap.addAll(result.rels);
       _basenameMap.addAll(result.bases);
       _indexed = true;
+      // Misses recorded before the index existed must be retried now.
+      _cache.removeWhere((_, value) => value == null);
     } catch (e) {
       debugPrint('[QspPathResolver] Error during async indexing: $e');
     } finally {
@@ -122,6 +130,16 @@ class QspPathResolver {
       } catch (_) {}
     }
     clean = clean.replaceAll('\\', '/');
+
+    // An already absolute path that exists wins immediately.
+    //
+    // This must run *before* the leading-separator strip below: on iOS every
+    // absolute path starts with '/', and stripping it turned
+    // `/var/mobile/.../images/a.jpg` into a bogus game-relative path, so the
+    // image preview dialog rendered nothing until a basename lookup happened
+    // to save it.
+    if (p.isAbsolute(clean) && File(clean).existsSync()) return clean;
+
     while (clean.startsWith('/') || clean.startsWith('./')) {
       if (clean.startsWith('./')) {
         clean = clean.substring(2);

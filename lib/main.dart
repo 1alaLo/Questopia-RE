@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'core/error/crash_reporter.dart';
+import 'core/error/debug_log.dart';
 import 'core/helpers/platform_helper.dart';
 import 'core/l10n/app_localizations.dart';
 import 'core/providers/settings_provider.dart';
@@ -31,6 +32,7 @@ void main() async {
     );
   }
   CrashReporter.install();
+  DebugLog.install();
   runApp(
     const ProviderScope(
       child: QuestopiaApp(),
